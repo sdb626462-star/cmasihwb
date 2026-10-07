@@ -151,7 +151,7 @@ def load_data_and_graph(disease_name):
     return districts_wb, df, A_norm, test_dates
 
 # ---------------------------------------------------------
-# FAST ZERO-CPU INFERENCE ENGINE
+# FAST INFERENCE ENGINE
 # ---------------------------------------------------------
 def get_model_and_predictions(disease_name, df, A_norm):
     file_prefix = disease_name.lower().replace(" ", "_")
@@ -199,7 +199,7 @@ def get_model_and_predictions(disease_name, df, A_norm):
     return model, X_test, Y_test, y_pred_actual, y_true_actual, mae, rmse, r2, train_size, SEQ_LEN, A_tensor
 
 # ---------------------------------------------------------
-# SIDEBAR CONTROLS & MONITORING PANEL
+# SIDEBAR CONTROLS
 # ---------------------------------------------------------
 st.sidebar.header("🏥 Public Health Control Center")
 
@@ -222,13 +222,85 @@ st.sidebar.metric("Forecast Accuracy Confidence", f"{confidence_score}%")
 st.sidebar.metric("Expected Case Margin", f"±{mae:.1f} patients")
 
 # ---------------------------------------------------------
+# GLOBAL DATA COMPUTATIONS (AVAILABLE TO ALL TABS)
+# ---------------------------------------------------------
+N_DIST = len(districts_wb)
+available_test_dates = test_dates[train_size + SEQ_LEN :]
+
+recent_wk = y_pred_actual[-1, :]
+prev_wk = y_pred_actual[-2, :]
+delta_cases = recent_wk - prev_wk
+pct_change = (delta_cases / np.maximum(prev_wk, 1e-5)) * 100
+
+driver_labels = [
+    "Heavy Rainfall & Stagnant Water", 
+    "High Ambient Temperature", 
+    "Dense Vegetation (Mosquito Shelter)", 
+    "Clinic Surveillance & Fever Reports", 
+    "Recent Infection Baseline"
+]
+
+nodes_clinical = []
+for i in range(N_DIST):
+    d_val = delta_cases[i]
+    p_val = pct_change[i]
+    pred_c = float(recent_wk[i])
+    
+    if d_val > 0.5:
+        status, symbol = "ESCALATING OUTBREAK RISK", "🚨"
+        rgb_color = [235, 52, 52]        
+        action_text = "Deploy vector fogging & issue fever clinic alert."
+    elif d_val < -0.5:
+        status, symbol = "SUBSIDING RISK", "✅"
+        rgb_color = [46, 204, 113]       
+        action_text = "Cases declining. Maintain routine monitoring."
+    else:
+        status, symbol = "STABLE CASE RATE", "⚠️"
+        rgb_color = [241, 196, 15]       
+        action_text = "Case count steady. Continue standard testing."
+        
+    top_driver_name = driver_labels[i % len(driver_labels)]
+    driver_contrib = int(35 + (i * 7) % 25)
+    
+    nodes_clinical.append({
+        "name": districts_wb[i]["name"],
+        "lat": districts_wb[i]["lat"],
+        "lng": districts_wb[i]["lng"],
+        "predicted_cases": round(pred_c, 1),
+        "delta": round(float(d_val), 1),
+        "pct_change": round(float(p_val), 1),
+        "status": status,
+        "symbol": symbol,
+        "color": rgb_color,
+        "radius": int(pred_c * 280 + 5000),
+        "top_driver": f"{top_driver_name} ({driver_contrib}% influence)",
+        "action": action_text
+    })
+
+edges_clinical = []
+for i in range(N_DIST):
+    for j in range(i + 1, N_DIST):
+        w = float(A_norm[i, j])
+        if w > 0.02:
+            edges_clinical.append({
+                "from_name": districts_wb[i]["name"],
+                "from_lat": districts_wb[i]["lat"],
+                "from_lng": districts_wb[i]["lng"],
+                "to_name": districts_wb[j]["name"],
+                "to_lat": districts_wb[j]["lat"],
+                "to_lng": districts_wb[j]["lng"],
+                "spread_strength": round(w * 100, 1)
+            })
+
+df_nodes = pd.DataFrame(nodes_clinical)
+df_edges = pd.DataFrame(edges_clinical)
+
+# ---------------------------------------------------------
 # APP HEADER & DASHBOARD TABS
 # ---------------------------------------------------------
 st.title("🏥 Outbreak Early Warning & Response System")
 st.subheader(f"Predictive Risk Map & Outbreak Drivers — {selected_disease} Monitoring Panel")
 st.markdown("---")
-
-available_test_dates = test_dates[train_size + SEQ_LEN :]
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔎 Explainable ST-GNN / DCMG map",
@@ -293,75 +365,6 @@ with tab2:
     st.subheader(f"Interactive District Risk Map & Transmission Routes — {selected_disease}")
     st.write("Visualizing **District Patient Risk** (circles), **Primary Outbreak Drivers**, and **Infection Transmission Corridors** (connecting lines):")
 
-    recent_wk = y_pred_actual[-1, :]
-    prev_wk = y_pred_actual[-2, :]
-    delta_cases = recent_wk - prev_wk
-    pct_change = (delta_cases / np.maximum(prev_wk, 1e-5)) * 100
-
-    driver_labels = [
-        "Heavy Rainfall & Stagnant Water", 
-        "High Ambient Temperature", 
-        "Dense Vegetation (Mosquito Shelter)", 
-        "Clinic Surveillance & Fever Reports", 
-        "Recent Infection Baseline"
-    ]
-
-    nodes_clinical = []
-    for i in range(len(districts_wb)):
-        d_val = delta_cases[i]
-        p_val = pct_change[i]
-        pred_c = float(recent_wk[i])
-        
-        if d_val > 0.5:
-            status, symbol = "ESCALATING OUTBREAK RISK", "🚨"
-            rgb_color = [235, 52, 52]        
-            action_text = "Deploy vector fogging & issue fever clinic alert."
-        elif d_val < -0.5:
-            status, symbol = "SUBSIDING RISK", "✅"
-            rgb_color = [46, 204, 113]       
-            action_text = "Cases declining. Maintain routine monitoring."
-        else:
-            status, symbol = "STABLE CASE RATE", "⚠️"
-            rgb_color = [241, 196, 15]       
-            action_text = "Case count steady. Continue standard testing."
-            
-        top_driver_name = driver_labels[i % len(driver_labels)]
-        driver_contrib = int(35 + (i * 7) % 25)
-        
-        nodes_clinical.append({
-            "name": districts_wb[i]["name"],
-            "lat": districts_wb[i]["lat"],
-            "lng": districts_wb[i]["lng"],
-            "predicted_cases": round(pred_c, 1),
-            "delta": round(float(d_val), 1),
-            "pct_change": round(float(p_val), 1),
-            "status": status,
-            "symbol": symbol,
-            "color": rgb_color,
-            "radius": int(pred_c * 280 + 5000),
-            "top_driver": f"{top_driver_name} ({driver_contrib}% influence)",
-            "action": action_text
-        })
-
-    edges_clinical = []
-    N_DIST = len(districts_wb)
-    for i in range(N_DIST):
-        for j in range(i + 1, N_DIST):
-            w = float(A_norm[i, j])
-            if w > 0.02:
-                edges_clinical.append({
-                    "from_name": districts_wb[i]["name"],
-                    "from_lat": districts_wb[i]["lat"],
-                    "from_lng": districts_wb[i]["lng"],
-                    "to_name": districts_wb[j]["name"],
-                    "to_lat": districts_wb[j]["lat"],
-                    "to_lng": districts_wb[j]["lng"],
-                    "spread_strength": round(w * 100, 1)
-                })
-
-    df_nodes = pd.DataFrame(nodes_clinical)
-    df_edges = pd.DataFrame(edges_clinical)
-
     col_m1, col_m2 = st.columns([3, 1])
     with col_m2:
         st.markdown("#### Filter View")
@@ -372,108 +375,4 @@ with tab2:
             value=4.0,
             step=0.5
         )
-        filtered_edges = df_edges[df_edges["spread_strength"] >= min_strength]
-        
-        st.info(f"Displaying **{len(filtered_edges)}** active transmission routes.")
-        st.markdown("""
-        **Map Legend:**
-        * 🔴 **Red Circles:** Escalating Outbreak Risk
-        * 🟡 **Yellow Circles:** Stable Risk
-        * 🟢 **Green Circles:** Subsiding Risk
-        * 🌉 **Blue Arcs:** Inter-District Infection Spread Routes
-        """)
-
-    with col_m1:
-        node_layer = pdk.Layer(
-            "ScatterplotLayer",
-            df_nodes,
-            get_position=["lng", "lat"],
-            get_fill_color="color",
-            get_radius="radius",
-            pickable=True,
-            opacity=0.85,
-            stroked=True,
-            get_line_color=[255, 255, 255],
-            get_line_width=150
-        )
-
-        arc_layer = pdk.Layer(
-            "ArcLayer",
-            filtered_edges,
-            get_source_position=["from_lng", "from_lat"],
-            get_target_position=["to_lng", "to_lat"],
-            get_source_color=[235, 52, 52, 180],
-            get_target_color=[52, 152, 219, 180],
-            get_width="spread_strength * 0.8",
-            pickable=True
-        )
-
-        view_state = pdk.ViewState(
-            latitude=23.8000,
-            longitude=87.8000,
-            zoom=6.8,
-            pitch=35,
-            bearing=0
-        )
-
-        st.pydeck_chart(
-            pdk.Deck(
-                layers=[arc_layer, node_layer],
-                initial_view_state=view_state,
-                map_style="mapbox://styles/mapbox/dark-v10",
-                tooltip={
-                    "html": "<div style='font-family: sans-serif; font-size: 13px; padding: 8px;'>"
-                            "<b style='font-size:15px;'>{name} District</b><br/>"
-                            "-----------------------------------<br/>"
-                            "• <b>Expected Cases Next Week:</b> <span style='color:#ff4b4b; font-weight:bold;'>{predicted_cases} patients</span><br/>"
-                            "• <b>Outbreak Trend:</b> {symbol} {status} ({pct_change}% change)<br/>"
-                            "• <b>Primary Driver:</b> <span style='color:#ffd700;'>{top_driver}</span><br/>"
-                            "• <b>Recommended Action:</b> <i>{action}</i>"
-                            "</div>",
-                    "style": {"backgroundColor": "#1e222a", "color": "#ffffff", "borderRadius": "6px"}
-                }
-            )
-        )
-
-# =========================================================
-# TAB 3: DISTRICT CASE TRAJECTORY
-# =========================================================
-with tab3:
-    st.subheader(f"Weekly Patient Case Forecast: {selected_district} ({selected_disease})")
-    
-    col1, col2, col3 = st.columns(3)
-    target_trend = nodes_clinical[district_idx]
-    
-    col1.metric("Recent Historical Average", f"{np.mean(y_true_actual[:, district_idx]):.0f} patients/wk")
-    col2.metric("Forecasted Cases Next Week", f"{target_trend['predicted_cases']:.0f} patients")
-    col3.metric("Expected Change", f"{target_trend['symbol']} {target_trend['status']}", delta=f"{target_trend['pct_change']}%")
-
-    st.markdown("---")
-
-    fig, ax = plt.subplots(figsize=(10, 3.8))
-    weeks_test = range(len(y_true_actual))
-    ax.plot(weeks_test, y_true_actual[:, district_idx], label="Reported Hospital Admissions", color="#1f77b4", linewidth=2.5, marker='o')
-    ax.plot(weeks_test, y_pred_actual[:, district_idx], label="Early Warning System Forecast", color="#ff7f0e", linestyle="--", linewidth=2.5, marker='s')
-    ax.set_xlabel("Monitoring Timeline (Past Weeks)")
-    ax.set_ylabel("Number of Patients")
-    ax.set_title(f"Weekly Patient Counts for {selected_disease} in {selected_district}")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    st.pyplot(fig)
-
-# =========================================================
-# TAB 4: OUTBREAK ROOT CAUSES
-# =========================================================
-with tab4:
-    st.subheader(f"Key Environmental & Regional Outbreak Drivers ({selected_disease})")
-    st.write("This chart highlights the primary real-world factors driving disease incidence across the region:")
-
-    feature_names = [
-        "Ambient Temperature (Mosquito Breeding Speed)", 
-        "Rainfall & Flooding (Breeding Water)", 
-        "Vegetation Cover (Adult Mosquito Shelter)", 
-        "Clinic Surveillance & Fever Reports", 
-        "Recent Infection History"
-    ]
-    
-    driver_
+        filtered_
