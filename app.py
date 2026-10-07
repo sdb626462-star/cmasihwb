@@ -354,3 +354,102 @@ with tab_map:
             get_target_position=["to_lng", "to_lat"],
             get_source_color=[255, 80, 80, 180],
             get_target_color=[50, 150, 255, 180],
+            get_width="coupling_weight * 12",
+            pickable=True
+        )
+
+        # 3D Viewport Centered on West Bengal
+        view_state = pdk.ViewState(
+            latitude=23.8000,
+            longitude=87.8000,
+            zoom=6.8,
+            pitch=40,
+            bearing=0
+        )
+
+        # Interactive Pydeck Chart
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[arc_layer, node_layer],
+                initial_view_state=view_state,
+                map_style="mapbox://styles/mapbox/dark-v10",
+                tooltip={
+                    "html": "<div style='font-family: sans-serif; font-size: 13px; padding: 6px;'>"
+                            "<b>District:</b> {name}{from_name}<br/>"
+                            "<b>Predicted Cases:</b> {predicted_cases}<br/>"
+                            "<b>Trajectory:</b> {symbol} {status} ({pct_change}%)<br/>"
+                            "<b>Primary Risk Driver:</b> <span style='color:#ffd700;'>{top_driver}</span><br/>"
+                            "<b>Corridor Coupling:</b> {coupling_weight}"
+                            "</div>",
+                    "style": {"backgroundColor": "#1e222a", "color": "#ffffff", "borderRadius": "6px"}
+                }
+            )
+        )
+
+# --- TAB 2: DISTRICT TRAJECTORY ---
+with tab_forecast:
+    st.subheader(f"Trajectory & Trend Prediction: {selected_district}")
+    
+    col1, col2, col3 = st.columns(3)
+    dist_true_avg = np.mean(y_true_actual[:, district_idx])
+    dist_pred_avg = np.mean(y_pred_actual[:, district_idx])
+    target_trend = nodes_explainability[district_idx]
+    
+    col1.metric("Observed Mean Cases", f"{dist_true_avg:.1f}")
+    col2.metric("Predicted Mean Cases", f"{dist_pred_avg:.1f}")
+    col3.metric("Predicted Trajectory", f"{target_trend['symbol']} {target_trend['status']}", delta=f"{target_trend['pct_change']}%")
+
+    fig, ax = plt.subplots(figsize=(10, 3.8))
+    weeks_test = range(len(y_true_actual))
+    ax.plot(weeks_test, y_true_actual[:, district_idx], label="Observed Cases", color="#1f77b4", linewidth=2, marker='o')
+    ax.plot(weeks_test, y_pred_actual[:, district_idx], label="STGNN Forecast", color="#ff7f0e", linestyle="--", linewidth=2, marker='s')
+    ax.set_xlabel("Evaluation Window (Weeks)")
+    ax.set_ylabel("Incident Cases")
+    ax.set_title(f"Weekly Case Forecast for {selected_district}")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    st.pyplot(fig)
+
+# --- TAB 3: FEATURE DRIVERS ---
+with tab_shap:
+    st.subheader(f"Global Outbreak Driver Importance ({selected_disease})")
+    
+    feature_names = ["Temperature", "Precipitation", "LAI (Vegetation)", "BioBERT Risk", "Historical Cases"]
+    importance_scores = []
+
+    with torch.no_grad():
+        for f_idx in range(len(feature_names)):
+            X_test_perm = X_test.clone()
+            perm_idx = torch.randperm(X_test_perm.shape[0])
+            X_test_perm[:, :, :, f_idx] = X_test_perm[perm_idx, :, :, f_idx]
+            
+            y_perm_pred = model(X_test_perm, A_tensor).numpy() * std_cases + mean_cases
+            perm_mae = np.mean(np.abs(y_perm_pred - y_true_actual))
+            importance_scores.append(max(0, perm_mae - mae))
+
+    importance_pct = (np.array(importance_scores) / np.sum(importance_scores)) * 100
+
+    fig_shap, ax_shap = plt.subplots(figsize=(8, 3.5))
+    y_pos = np.arange(len(feature_names))
+    ax_shap.barh(y_pos, importance_pct, align='center', color='#2ca02c')
+    ax_shap.set_yticks(y_pos)
+    ax_shap.set_yticklabels(feature_names)
+    ax_shap.invert_yaxis()
+    ax_shap.set_xlabel("Relative Importance (%)")
+    ax_shap.set_title(f"Primary Outbreak Drivers for {selected_disease}")
+    for i, v in enumerate(importance_pct):
+        ax_shap.text(v + 0.5, i, f"{v:.1f}%", va='center')
+    st.pyplot(fig_shap)
+
+# --- TAB 4: SPATIAL GRAPH MATRIX ---
+with tab_graph:
+    st.subheader(f"Dynamic Spatial Adjacency Matrix ($\mathbf{{A}}_{{\\text{{norm}}}}$)")
+    
+    fig_hm, ax_hm = plt.subplots(figsize=(7, 5))
+    cax = ax_hm.matshow(A_norm, cmap='Blues')
+    fig_hm.colorbar(cax)
+    ax_hm.set_xticks(range(N_DIST))
+    ax_hm.set_yticks(range(N_DIST))
+    ax_hm.set_xticklabels([d["name"][:3] for d in districts_wb], rotation=90, fontsize=7)
+    ax_hm.set_yticklabels([d["name"][:3] for d in districts_wb], fontsize=7)
+    st.pyplot(fig_hm)
