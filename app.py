@@ -7,12 +7,13 @@ import numpy as np
 import pandas as pd
 import scipy.spatial.distance as sp_dist
 import matplotlib.pyplot as plt
+import json
 
 # ---------------------------------------------------------
 # PAGE CONFIGURATION
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="CMA-SIH: Disease Forecasting & Mappls GIS",
+    page_title="CMA-SIH: Outbreak GIS & Trajectory Prediction",
     page_icon="🦠",
     layout="wide"
 )
@@ -22,7 +23,7 @@ st.set_page_config(
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Control Panel")
 
-# Disease Selector
+# Target Disease Selection
 disease_options = ["Dengue", "Malaria", "Japanese Encephalitis", "Chikungunya"]
 selected_disease = st.sidebar.selectbox("Select Target Disease:", disease_options)
 
@@ -33,11 +34,11 @@ mappls_api_key = st.sidebar.text_input("Enter Mappls API Key:", value="", type="
 st.sidebar.markdown("---")
 
 st.title("🦠 CMA-SIH: Causal Multimodal AI Framework")
-st.subheader(f"Vector-Borne Disease Forecasting & Mappls Spatial Analytics ({selected_disease}) — West Bengal")
+st.subheader(f"Disease Forecasting & Mappls Spatial Trend Analytics ({selected_disease}) — West Bengal")
 st.markdown("---")
 
 # ---------------------------------------------------------
-# DATA & MODEL SETUP (CACHED FOR PERFORMANCE)
+# DATA & GRAPH SETUP
 # ---------------------------------------------------------
 @st.cache_data
 def load_data_and_graph(disease_name):
@@ -45,29 +46,29 @@ def load_data_and_graph(disease_name):
     np.random.seed(42)
 
     districts_wb = [
-        {"name": "Kolkata", "lat": 22.5726, "lon": 88.3639},
-        {"name": "Howrah", "lat": 22.5958, "lon": 88.2636},
-        {"name": "North 24 Parganas", "lat": 22.7220, "lon": 88.4800},
-        {"name": "South 24 Parganas", "lat": 22.1400, "lon": 88.4200},
-        {"name": "Hooghly", "lat": 22.9000, "lon": 88.3900},
-        {"name": "Nadia", "lat": 23.4710, "lon": 88.5565},
-        {"name": "Murshidabad", "lat": 24.1750, "lon": 88.2800},
-        {"name": "Birbhum", "lat": 23.8400, "lon": 87.6100},
-        {"name": "Bankura", "lat": 23.2324, "lon": 87.0784},
-        {"name": "Purulia", "lat": 23.3320, "lon": 86.3650},
-        {"name": "Paschim Medinipur", "lat": 22.4257, "lon": 87.3199},
-        {"name": "Purba Medinipur", "lat": 21.9300, "lon": 87.7800},
-        {"name": "Jhargram", "lat": 22.4500, "lon": 86.9800},
-        {"name": "Paschim Bardhaman", "lat": 23.6833, "lon": 86.9833},
-        {"name": "Purba Bardhaman", "lat": 23.2333, "lon": 87.8667},
-        {"name": "Malda", "lat": 25.0000, "lon": 88.1400},
-        {"name": "Uttar Dinajpur", "lat": 25.6200, "lon": 88.1200},
-        {"name": "Dakshin Dinajpur", "lat": 25.2200, "lon": 88.7700},
-        {"name": "Jalpaiguri", "lat": 26.5200, "lon": 88.7300},
-        {"name": "Darjeeling", "lat": 27.0410, "lon": 88.2663},
-        {"name": "Kalimpong", "lat": 27.0600, "lon": 88.4700},
-        {"name": "Cooch Behar", "lat": 26.3200, "lon": 89.4500},
-        {"name": "Alipurduar", "lat": 26.4900, "lon": 89.5200}
+        {"name": "Kolkata", "lat": 22.5726, "lng": 88.3639},
+        {"name": "Howrah", "lat": 22.5958, "lng": 88.2636},
+        {"name": "North 24 Parganas", "lat": 22.7220, "lng": 88.4800},
+        {"name": "South 24 Parganas", "lat": 22.1400, "lng": 88.4200},
+        {"name": "Hooghly", "lat": 22.9000, "lng": 88.3900},
+        {"name": "Nadia", "lat": 23.4710, "lng": 88.5565},
+        {"name": "Murshidabad", "lat": 24.1750, "lng": 88.2800},
+        {"name": "Birbhum", "lat": 23.8400, "lng": 87.6100},
+        {"name": "Bankura", "lat": 23.2324, "lng": 87.0784},
+        {"name": "Purulia", "lat": 23.3320, "lng": 86.3650},
+        {"name": "Paschim Medinipur", "lat": 22.4257, "lng": 87.3199},
+        {"name": "Purba Medinipur", "lat": 21.9300, "lng": 87.7800},
+        {"name": "Jhargram", "lat": 22.4500, "lng": 86.9800},
+        {"name": "Paschim Bardhaman", "lat": 23.6833, "lng": 86.9833},
+        {"name": "Purba Bardhaman", "lat": 23.2333, "lng": 87.8667},
+        {"name": "Malda", "lat": 25.0000, "lng": 88.1400},
+        {"name": "Uttar Dinajpur", "lat": 25.6200, "lng": 88.1200},
+        {"name": "Dakshin Dinajpur", "lat": 25.2200, "lng": 88.7700},
+        {"name": "Jalpaiguri", "lat": 26.5200, "lng": 88.7300},
+        {"name": "Darjeeling", "lat": 27.0410, "lng": 88.2663},
+        {"name": "Kalimpong", "lat": 27.0600, "lng": 88.4700},
+        {"name": "Cooch Behar", "lat": 26.3200, "lng": 89.4500},
+        {"name": "Alipurduar", "lat": 26.4900, "lng": 89.5200}
     ]
 
     disease_scale = {
@@ -79,7 +80,7 @@ def load_data_and_graph(disease_name):
 
     N_DISTRICTS = len(districts_wb)
     N_WEEKS = 156
-    LAT_LON = np.array([[d["lat"], d["lon"]] for d in districts_wb])
+    LAT_LON = np.array([[d["lat"], d["lng"]] for d in districts_wb])
 
     weeks = np.arange(N_WEEKS)
     seasonal_temp = 26 + 6 * np.sin(2 * np.pi * weeks / 52)
@@ -115,353 +116,4 @@ def load_data_and_graph(disease_name):
     df = pd.DataFrame(data_list)
 
     dist_matrix = sp_dist.squareform(sp_dist.pdist(LAT_LON, metric='euclidean'))
-    spatial_adj = np.exp(-dist_matrix / (0.5 * np.std(dist_matrix)))
-    case_matrix = df.pivot(index='week', columns='district_idx', values='cases').values
-    corr_matrix = np.maximum(0, np.nan_to_num(np.corrcoef(case_matrix.T), 0))
-
-    A_dcmg = 0.6 * spatial_adj + 0.4 * corr_matrix
-    deg = np.diag(np.sum(A_dcmg, axis=1)**(-0.5))
-    A_norm = np.dot(np.dot(deg, A_dcmg), deg)
-
-    return districts_wb, df, A_norm
-
-# STGNN Architecture
-class STGNNCell(nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super(STGNNCell, self).__init__()
-        self.fc = nn.Linear(in_dim, out_dim)
-        self.gate = nn.Linear(in_dim, out_dim)
-        
-    def forward(self, x, adj):
-        ax = torch.einsum('ij,bjk->bik', adj, x)
-        h = self.fc(ax)
-        g = torch.sigmoid(self.gate(ax))
-        return torch.relu(h) * g
-
-class PhysicsSTGNN(nn.Module):
-    def __init__(self, in_features, hidden_dim):
-        super(PhysicsSTGNN, self).__init__()
-        self.gcn1 = STGNNCell(in_features, hidden_dim)
-        self.gcn2 = STGNNCell(hidden_dim, hidden_dim)
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, num_layers=2)
-        self.out_head = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
-        )
-        
-    def forward(self, x_seq, adj):
-        B, T, N, F = x_seq.shape
-        gcn_list = []
-        for t in range(T):
-            h1 = self.gcn1(x_seq[:, t], adj)
-            h2 = self.gcn2(h1, adj) + h1
-            gcn_list.append(h2)
-            
-        gcn_seq = torch.stack(gcn_list, dim=1)
-        gcn_seq = gcn_seq.permute(0, 2, 1, 3).contiguous().view(B * N, T, -1)
-        _, (hn, _) = self.lstm(gcn_seq)
-        return self.out_head(hn[-1]).view(B, N)
-
-@st.cache_resource
-def train_model(df, A_norm, epochs=350):
-    torch.manual_seed(42)
-    N_WEEKS = 156
-    SEQ_LEN = 6
-    features_cols = ["temp", "preci", "lai", "biobert_signal", "cases"]
-    
-    feature_matrix = np.array([df[df["week"] == w][features_cols].values for w in range(N_WEEKS)])
-    mean_f = np.mean(feature_matrix, axis=(0,1), keepdims=True)
-    std_f = np.std(feature_matrix, axis=(0,1), keepdims=True)
-    feature_matrix_norm = (feature_matrix - mean_f) / std_f
-
-    mean_cases, std_cases = mean_f[0, 0, 4], std_f[0, 0, 4]
-
-    X, Y = [], []
-    for t in range(N_WEEKS - SEQ_LEN):
-        X.append(feature_matrix_norm[t : t + SEQ_LEN])
-        Y.append(feature_matrix_norm[t + SEQ_LEN, :, 4])
-
-    X = torch.tensor(np.array(X), dtype=torch.float32)
-    Y = torch.tensor(np.array(Y), dtype=torch.float32)
-
-    train_size = int(len(X) * 0.8)
-    X_train, X_test = X[:train_size], X[train_size:]
-    Y_train, Y_test = Y[:train_size], Y[train_size:]
-
-    A_tensor = torch.tensor(A_norm, dtype=torch.float32)
-    model = PhysicsSTGNN(in_features=5, hidden_dim=64)
-    optimizer = optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
-
-    for epoch in range(epochs):
-        model.train()
-        optimizer.zero_grad()
-        y_pred = model(X_train, A_tensor)
-        
-        mse_loss = nn.MSELoss()(y_pred, Y_train)
-        spatial_diff = torch.matmul(y_pred, torch.eye(A_tensor.shape[0]) - A_tensor)
-        total_loss = mse_loss + 0.005 * torch.mean(torch.square(spatial_diff))
-        total_loss.backward()
-        optimizer.step()
-        scheduler.step()
-
-    model.eval()
-    with torch.no_grad():
-        y_pred_actual = model(X_test, A_tensor).numpy() * std_cases + mean_cases
-        y_true_actual = Y_test.numpy() * std_cases + mean_cases
-
-    mae = np.mean(np.abs(y_pred_actual - y_true_actual))
-    rmse = np.sqrt(np.mean((y_pred_actual - y_true_actual)**2))
-    mape = np.mean(np.abs((y_pred_actual - y_true_actual) / y_true_actual)) * 100
-    r2 = 1 - (np.sum((y_true_actual - y_pred_actual)**2) / np.sum((y_true_actual - np.mean(y_true_actual))**2))
-
-    return model, X_test, Y_test, y_pred_actual, y_true_actual, mae, rmse, mape, r2, std_cases, mean_cases, A_tensor
-
-# Load Data and Model
-districts_wb, df, A_norm = load_data_and_graph(selected_disease)
-model, X_test, Y_test, y_pred_actual, y_true_actual, mae, rmse, mape, r2, std_cases, mean_cases, A_tensor = train_model(df, A_norm)
-
-# Target District Selection
-selected_district = st.sidebar.selectbox("Select Target District:", [d["name"] for d in districts_wb])
-district_idx = [d["name"] for d in districts_wb].index(selected_district)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader(f"📊 Framework Metrics ({selected_disease})")
-st.sidebar.metric("R² Score", f"{r2:.4f}")
-st.sidebar.metric("MAE", f"{mae:.2f} cases")
-st.sidebar.metric("RMSE", f"{rmse:.2f}")
-st.sidebar.metric("MAPE", f"{mape:.2f}%")
-
-# ---------------------------------------------------------
-# EPIDEMIC TREND PREDICTION (INCREASING vs. DECREASING)
-# ---------------------------------------------------------
-recent_wk = y_pred_actual[-1, :]
-prev_wk = y_pred_actual[-2, :]
-delta_cases = recent_wk - prev_wk
-pct_change = (delta_cases / np.maximum(prev_wk, 1e-5)) * 100
-
-district_trends = []
-for i in range(len(districts_wb)):
-    d_val = delta_cases[i]
-    p_val = pct_change[i]
-    if d_val > 0.5:
-        trend_status = "Increasing"
-        trend_symbol = "📈"
-        color_code = "#ff4b4b"  # Red
-    elif d_val < -0.5:
-        trend_status = "Decreasing"
-        trend_symbol = "📉"
-        color_code = "#00c853"  # Green
-    else:
-        trend_status = "Stable"
-        trend_symbol = "➖"
-        color_code = "#ffab00"  # Amber
-        
-    district_trends.append({
-        "name": districts_wb[i]["name"],
-        "lat": districts_wb[i]["lat"],
-        "lon": districts_wb[i]["lon"],
-        "predicted_cases": round(float(recent_wk[i]), 1),
-        "delta": round(float(d_val), 1),
-        "pct_change": round(float(p_val), 1),
-        "status": trend_status,
-        "symbol": trend_symbol,
-        "color": color_code
-    })
-
-target_trend = district_trends[district_idx]
-
-# ---------------------------------------------------------
-# INTERFACE TABS
-# ---------------------------------------------------------
-tab_map, tab_forecast, tab_shap, tab_graph = st.tabs([
-    "🗺️ Mappls Map", 
-    "📈 District Forecast & Trend", 
-    "🔍 Feature Drivers", 
-    "🌐 DCMG Graph"
-])
-
-# --- TAB 1: MAPPLS MAP INTEGRATION ---
-with tab_map:
-    st.subheader(f"Mappls GIS Outbreak Map — {selected_disease}")
-    st.write("Spatial distribution and trajectory predictions across West Bengal districts:")
-
-    marker_data_json = str(district_trends)
-
-    if mappls_api_key.strip():
-        # Render Mappls Web SDK Map
-        mappls_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <script src="https://apis.mappls.com/advancedmaps/v1/{mappls_api_key.strip()}/map_load?v=1.5"></script>
-            <style>
-                #map {{ width: 100%; height: 520px; border-radius: 8px; border: 1px solid #ccc; }}
-            </style>
-        </head>
-        <body>
-            <div id="map"></div>
-            <script>
-                var districts = {marker_data_json};
-                var map = new mappls.Map('map', {{ center: [23.8, 87.8], zoom: 7 }});
-
-                districts.forEach(function(d) {{
-                    var marker = new mappls.Marker({{
-                        map: map,
-                        position: [d.lat, d.lon],
-                        popupHtml: "<div style='font-family:sans-serif; padding:5px;'>" +
-                                   "<b>" + d.name + "</b><br/>" +
-                                   "Pred. Cases: <b>" + d.predicted_cases + "</b><br/>" +
-                                   "Trend: <b style='color:" + d.color + "'>" + d.symbol + " " + d.status + " (" + d.pct_change + "%)</b>" +
-                                   "</div>"
-                    }});
-                }});
-            </script>
-        </body>
-        </html>
-        """
-        components.html(mappls_html, height=540)
-    else:
-        st.info("💡 **Mappls Key Notice:** Enter your Mappls API key in the sidebar to render vector Mappls tiles. Displaying standard GIS rendering below:")
-        
-        leaflet_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <style>
-                #map {{ width: 100%; height: 500px; border-radius: 8px; }}
-            </style>
-        </head>
-        <body>
-            <div id="map"></div>
-            <script>
-                var map = L.map('map').setView([23.8, 87.8], 7);
-                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                    attribution: '© OpenStreetMap | CMA-SIH'
-                }}).addTo(map);
-
-                var districts = {marker_data_json};
-
-                districts.forEach(function(d) {{
-                    var circle = L.circleMarker([d.lat, d.lon], {{
-                        color: d.color,
-                        fillColor: d.color,
-                        fillOpacity: 0.85,
-                        radius: 10
-                    }}).addTo(map);
-
-                    circle.bindPopup(
-                        "<b>" + d.name + "</b><br/>" +
-                        "Predicted Cases: <b>" + d.predicted_cases + "</b><br/>" +
-                        "Trend: <b style='color:" + d.color + "'>" + d.symbol + " " + d.status + " (" + d.pct_change + "%)</b>"
-                    );
-                }});
-            </script>
-        </body>
-        </html>
-        """
-        components.html(leaflet_html, height=520)
-
-# --- TAB 2: DISTRICT FORECAST & TREND ---
-with tab_forecast:
-    st.subheader(f"Epidemic Trajectory Prediction: {selected_district}")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    dist_true_avg = np.mean(y_true_actual[:, district_idx])
-    dist_pred_avg = np.mean(y_pred_actual[:, district_idx])
-    
-    col1.metric("Observed Avg Weekly Cases", f"{dist_true_avg:.1f}")
-    col2.metric("Predicted Avg Weekly Cases", f"{dist_pred_avg:.1f}")
-    col3.metric("Predicted Trajectory", f"{target_trend['symbol']} {target_trend['status']}", delta=f"{target_trend['pct_change']}%")
-    col4.metric("Absolute Delta Error", f"{abs(dist_true_avg - dist_pred_avg):.1f} cases")
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    weeks_test = range(len(y_true_actual))
-    ax.plot(weeks_test, y_true_actual[:, district_idx], label=f"Observed {selected_disease} Cases", color="#1f77b4", linewidth=2, marker='o')
-    ax.plot(weeks_test, y_pred_actual[:, district_idx], label=f"STGNN Forecast", color="#ff7f0e", linestyle="--", linewidth=2, marker='s')
-    ax.set_xlabel("Evaluation Window (Weeks)")
-    ax.set_ylabel("Cases")
-    ax.set_title(f"Trajectory Prediction for {selected_disease} in {selected_district}")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    st.pyplot(fig)
-
-    st.subheader(f"All District Trend Ranking ({selected_disease})")
-    df_ranking = pd.DataFrame([
-        {
-            "District": d["name"],
-            "Predicted Cases": d["predicted_cases"],
-            "Predicted Trend": f"{d['symbol']} {d['status']}",
-            "Week-over-Week Delta": f"{d['delta']:+.1f} cases ({d['pct_change']:+.1f}%)"
-        } for d in district_trends
-    ]).sort_values(by="Predicted Cases", ascending=False)
-    
-    st.dataframe(df_ranking, use_container_width=True)
-
-# --- TAB 3: FEATURE DRIVERS ---
-with tab_shap:
-    st.subheader(f"Feature Attribution ({selected_disease})")
-    
-    feature_names = ["Temperature", "Precipitation", "LAI (Vegetation)", "BioBERT Risk", "Historical Cases"]
-    importance_scores = []
-
-    with torch.no_grad():
-        for f_idx in range(len(feature_names)):
-            X_test_perm = X_test.clone()
-            perm_idx = torch.randperm(X_test_perm.shape[0])
-            X_test_perm[:, :, :, f_idx] = X_test_perm[perm_idx, :, :, f_idx]
-            
-            y_perm_pred = model(X_test_perm, A_tensor).numpy() * std_cases + mean_cases
-            perm_mae = np.mean(np.abs(y_perm_pred - y_true_actual))
-            importance_scores.append(max(0, perm_mae - mae))
-
-    importance_pct = (np.array(importance_scores) / np.sum(importance_scores)) * 100
-
-    fig_shap, ax_shap = plt.subplots(figsize=(8, 4))
-    y_pos = np.arange(len(feature_names))
-    ax_shap.barh(y_pos, importance_pct, align='center', color='#2ca02c')
-    ax_shap.set_yticks(y_pos)
-    ax_shap.set_yticklabels(feature_names)
-    ax_shap.invert_yaxis()
-    ax_shap.set_xlabel("Relative Importance (%)")
-    ax_shap.set_title(f"Drivers for {selected_disease} Outbreaks")
-    for i, v in enumerate(importance_pct):
-        ax_shap.text(v + 0.5, i, f"{v:.1f}%", va='center')
-    st.pyplot(fig_shap)
-
-# --- TAB 4: DCMG GRAPH ---
-with tab_graph:
-    st.subheader(f"Dynamic Transmission Graph ({selected_disease})")
-    
-    N_DISTRICTS = len(districts_wb)
-    top_pairs = []
-    for i in range(N_DISTRICTS):
-        for j in range(i + 1, N_DISTRICTS):
-            top_pairs.append({
-                "District 1": districts_wb[i]["name"],
-                "District 2": districts_wb[j]["name"],
-                "Coupling Weight": np.round(A_norm[i, j], 4)
-            })
-
-    df_pairs = pd.DataFrame(top_pairs).sort_values(by="Coupling Weight", ascending=False)
-    
-    col_g1, col_g2 = st.columns([1, 1])
-    with col_g1:
-        st.write("### Top Transmission Corridors")
-        st.dataframe(df_pairs.head(10), use_container_width=True)
-
-    with col_g2:
-        st.write("### Spatial Adjacency Matrix")
-        fig_hm, ax_hm = plt.subplots(figsize=(6, 5))
-        cax = ax_hm.matshow(A_norm, cmap='Blues')
-        fig_hm.colorbar(cax)
-        ax_hm.set_xticks(range(N_DISTRICTS))
-        ax_hm.set_yticks(range(N_DISTRICTS))
-        ax_hm.set_xticklabels([d["name"][:3] for d in districts_wb], rotation=90, fontsize=7)
-        ax_hm.set_yticklabels([d["name"][:3] for d in districts_wb], fontsize=7)
-        st.pyplot(fig_hm)
+    spatial_adj =
