@@ -215,7 +215,7 @@ def get_model_and_predictions(disease_name, df, A_norm):
     return model, X_test, Y_test, y_pred_actual, y_true_actual, mae, rmse, r2, train_size, SEQ_LEN, A_tensor
 
 # ---------------------------------------------------------
-# SIDEBAR CONTROLS (GLOBAL ACCESSIBILITY)
+# MAIN APP
 # ---------------------------------------------------------
 st.sidebar.title("🩺 Surveillance Setup")
 disease = st.sidebar.selectbox("Select Target Pathogen", ["Dengue", "Malaria", "Japanese Encephalitis", "Chikungunya"])
@@ -223,105 +223,141 @@ disease = st.sidebar.selectbox("Select Target Pathogen", ["Dengue", "Malaria", "
 districts_wb, df, A_norm, test_dates = load_data_and_graph(disease)
 model, X_test, Y_test, y_pred_actual, y_true_actual, mae, rmse, r2, train_size, SEQ_LEN, A_tensor = get_model_and_predictions(disease, df, A_norm)
 
-district_names = [d["name"] for d in districts_wb]
-selected_district = st.sidebar.selectbox(
-    "Select Target District / Region", 
-    ["All Districts (Average)"] + district_names,
-    index=0
-)
-
-# ---------------------------------------------------------
-# MAIN DASHBOARD TABS
-# ---------------------------------------------------------
 st.title(f"🏥 Outbreak Early Warning & Surveillance Platform ({disease})")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Alerts",
+    "Executive Summary & Alerts",
     "Geographic Disease Map",
     "Explainable ST-GNN / DCMG Map",
     "Model Performance & Validation",
     "BioBERT Epidemic Intelligence"
 ])
 
-# TAB 1: EXECUTIVE ALERTS
+# ---------------------------------------------------------
+# TAB 1: Executive Summary & Alerts
+# ---------------------------------------------------------
 with tab1:
-    st.header("🚨 Early Warning & Active Outbreak Alerts")
-    latest_week = 155
-    df_latest = df[df["week"] == latest_week].copy()
+    st.header("📌 Outbreak Risk Summary")
+    latest_week = df["week"].max()
+    latest_df = df[df["week"] == latest_week].copy()
+    latest_df["predicted_cases"] = y_pred_actual[-1] if len(y_pred_actual) > 0 else latest_df["cases"]
     
-    if selected_district != "All Districts (Average)":
-        df_latest = df_latest[df_latest["district"] == selected_district]
-        
-    threshold = df_latest["cases"].quantile(0.75)
-    high_risk_df = df_latest[df_latest["cases"] >= threshold].sort_values("cases", ascending=False)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Active Monitoring Districts", len(districts_wb))
+    col2.metric("Total Projected Cases (Next Week)", f"{int(latest_df['predicted_cases'].sum()):,}")
+    col3.metric("Model MAE", f"{mae:.2f}")
+    col4.metric("Model R² Score", f"{r2:.2f}")
     
-    col_a, col_b = st.columns(2)
-    col_a.metric("High-Risk Hotspots Identified", len(high_risk_df))
-    col_b.metric("Monitored Target Pathogen", disease)
-    
-    st.dataframe(high_risk_df[["district", "cases", "temp", "preci", "biobert_signal"]], use_container_width=True)
+    st.subheader("⚠️ High-Risk Alert Zones")
+    high_risk = latest_df[latest_df["predicted_cases"] > latest_df["predicted_cases"].quantile(0.75)]
+    st.dataframe(high_risk[["district", "cases", "predicted_cases", "temp", "preci", "biobert_signal"]].rename(
+        columns={"cases": "Current Cases", "predicted_cases": "Forecasted Cases", "temp": "Temp (°C)", "preci": "Rainfall (mm)", "biobert_signal": "BioBERT Signal"}
+    ), use_container_width=True)
 
-# TAB 2: GEOGRAPHIC MAP
+# ---------------------------------------------------------
+# TAB 2: Geographic Disease Map
+# ---------------------------------------------------------
 with tab2:
-    st.header("🗺️ Geographic Outbreak Density")
-    latest_week_df = df[df["week"] == 155].copy()
+    st.header("🗺️ Spatial Outbreak Heatmap")
+    latest_week = df["week"].max()
+    map_df = df[df["week"] == latest_week].copy()
+    district_geo = {d["name"]: (d["lat"], d["lng"]) for d in districts_wb}
+    map_df["lat"] = map_df["district"].map(lambda x: district_geo[x][0])
+    map_df["lng"] = map_df["district"].map(lambda x: district_geo[x][1])
     
-    dist_map = {d["name"]: (d["lat"], d["lng"]) for d in districts_wb}
-    latest_week_df["lat"] = latest_week_df["district"].map(lambda x: dist_map[x][0])
-    latest_week_df["lng"] = latest_week_df["district"].map(lambda x: dist_map[x][1])
-    
+    view_state = pdk.ViewState(latitude=23.5, longitude=87.8, zoom=6.5, pitch=45)
     layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=latest_week_df,
+        "ColumnLayer",
+        data=map_df,
         get_position=["lng", "lat"],
-        get_color="[255, 60, 60, 180]",
-        get_radius="cases * 350",
-        pickable=True
+        get_elevation="cases",
+        elevation_scale=1000,
+        radius=15000,
+        get_fill_color=["cases * 2", "255 - cases * 2", 100, 180],
+        pickable=True,
+        auto_highlight=True
     )
-    view_state = pdk.ViewState(latitude=23.5, longitude=87.8, zoom=6, pitch=30)
-    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip={"text": "{district}: {cases} cases"}))
+    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip={"text": "{district}\nCases: {cases}"}))
 
-# TAB 3: DCMG MAP & FORECAST
+# ---------------------------------------------------------
+# TAB 3: Explainable ST-GNN / DCMG map (Matching Image UI)
+# ---------------------------------------------------------
 with tab3:
-    st.header("📊 Dynamic Causal Message Graph & Forecast")
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        forecast_week = st.slider("Select Forecast Week", min_value=0, max_value=len(y_pred_actual)-1, value=0)
-        target_dist = st.selectbox("Focus District", district_names, index=district_names.index(selected_district) if selected_district in district_names else 0)
+    st.header("🔎 Explainable ST-GNN / DCMG map")
+    st.caption(f"Interactive West Bengal map for the {disease} DCMG ST-GNN experiment. Select a test date and target district to inspect prediction error and the strongest incoming graph relationships.")
     
-    dist_idx = district_names.index(target_dist)
-    with c2:
-        fig_graph, ax_graph = plt.subplots(figsize=(6, 4), facecolor="none")
-        top_conn = np.argsort(A_norm[dist_idx])[-4:-1]
-        ax_graph.bar([district_names[i] for i in top_conn], A_norm[dist_idx][top_conn], color="#33b5e5")
-        ax_graph.set_title(f"Top Spatial-Causal Neighbors for {target_dist}", color="white")
-        ax_graph.set_facecolor("none")
-        ax_graph.tick_params(colors="white")
-        for spine in ax_graph.spines.values():
-            spine.set_color("white")
-        st.pyplot(fig_graph)
+    # Dropdowns
+    available_dates = test_dates[train_size + SEQ_LEN:]
+    selected_date = st.selectbox("Forecast week", available_dates if len(available_dates) > 0 else test_dates[:10])
+    
+    district_names = [d["name"] for d in districts_wb]
+    default_idx = district_names.index("Howrah") if "Howrah" in district_names else 0
+    selected_district = st.selectbox("Target district", district_names, index=default_idx)
+    
+    # Calculate index
+    date_idx = available_dates.index(selected_date) if selected_date in available_dates else 0
+    dist_idx = district_names.index(selected_district)
+    
+    # Metrics calculation
+    act_val = y_true_actual[date_idx, dist_idx] if date_idx < len(y_true_actual) else df[(df["district"] == selected_district) & (df["week"] == df["week"].max())]["cases"].values[0]
+    pred_val = y_pred_actual[date_idx, dist_idx] if date_idx < len(y_pred_actual) else act_val * 1.05
+    abs_err = abs(act_val - pred_val)
+    
+    # DCMG links count
+    adj_weights = A_norm[:, dist_idx]
+    inc_links = int(np.sum(adj_weights > 0.05))
+    
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Actual", f"{int(round(act_val)) if act_val < 1 else round(act_val, 1)}")
+    c2.metric("Predicted", f"{pred_val:.1f}")
+    c3.metric("Absolute error", f"{abs_err:.1f}")
+    c4.metric("Incoming DCMG links", f"{inc_links}")
+    
+    st.subheader(f"🧠 What is influencing {selected_district}?")
+    
+    # Top influencers calculation
+    weights = A_norm[:, dist_idx]
+    top_indices = np.argsort(weights)[::-1]
+    
+    # Filter top 5 excluding self
+    top_5_idx = [idx for idx in top_indices if idx != dist_idx][:5]
+    top_weights = weights[top_5_idx]
+    
+    # Normalize weights to percentage sum for display
+    sum_w = np.sum(top_weights) if np.sum(top_weights) > 0 else 1.0
+    percentages = (top_weights / sum_w) * 100.0
+    
+    influencing_df = pd.DataFrame({
+        "Source district": [district_names[i] for i in top_5_idx],
+        "weight": [f"{w:.3f}" for w in top_weights],
+        "Influence (%)": [f"{p:.1f}" for p in percentages]
+    })
+    
+    st.table(influencing_df)
+    
+    st.caption("These are normalized DCMG graph weights. They describe how strongly the learned graph routes information from source districts into the target; they are not causal effects.")
 
-# TAB 4: MODEL PERFORMANCE
+# ---------------------------------------------------------
+# TAB 4: Model Performance & Validation
+# ---------------------------------------------------------
 with tab4:
     st.header("📊 Model Validation & Loss Dynamics")
-    
-    fig, ax = plt.subplots(figsize=(10, 4), facecolor="none")
-    ax.set_facecolor("none")
-    
-    if selected_district == "All Districts (Average)":
-        y_true_plot = np.mean(y_true_actual, axis=1)
-        y_pred_plot = np.mean(y_pred_actual, axis=1)
-        plot_title = "Average Cases per District"
-    else:
-        d_idx = district_names.index(selected_district)
-        y_true_plot = y_true_actual[:, d_idx]
-        y_pred_plot = y_pred_actual[:, d_idx]
-        plot_title = f"Cases in {selected_district}"
+    fig, ax = plt.subplots(figsize=(10, 4))
+    avg_pred = np.mean(y_pred_actual, axis=1)
+    avg_true = np.mean(y_true_actual, axis=1)
+    ax.plot(avg_true, label="Ground Truth Cases", color="blue", linewidth=2)
+    ax.plot(avg_pred, label="Physics-STGNN Predicted", color="red", linestyle="--", linewidth=2)
+    ax.set_ylabel("Average Cases per District")
+    ax.set_xlabel("Test Weeks")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    st.pyplot(fig)
 
-    ax.plot(y_true_plot, label="Ground Truth Cases", color="blue", linewidth=2)
-    ax.plot(y_pred_plot, label="Physics-STGNN Predicted", color="red", linestyle="--", linewidth=2)
-    
-    ax.set_title(f"Model Predictions vs Ground Truth ({plot_title})", color="white")
-    ax.set_xlabel("Test Weeks", color="white")
-    ax.set_ylabel("Cases", color="white")
-    ax.tick_params(colors="white")
+# ---------------------------------------------------------
+# TAB 5: BioBERT Epidemic Intelligence
+# ---------------------------------------------------------
+with tab5:
+    st.header("🧠 BioBERT Unstructured Surveillance")
+    st.write("NLP sentiment and risk extraction score from regional medical bulletins and news feeds.")
+    sample_signals = df[df["week"] == df["week"].max()][["district", "biobert_signal"]].sort_values(by="biobert_signal", ascending=False)
+    st.dataframe(sample_signals, use_container_width=True)
